@@ -7,7 +7,7 @@ import os
 
 # ================= 1. 页面配置 =================
 st.set_page_config(
-    page_title="微博舆情数据交互看板",
+    page_title="微博生育津贴数据交互看板",
     page_icon="📊",
     layout="wide"
 )
@@ -50,37 +50,13 @@ for key in state_keys:
         st.session_state[key] = None
 
 
-# ================= 4. 密码验证 =================
-def check_password():
-    def password_entered():
-        if st.session_state["password"] == "888888":
-            st.session_state["password_correct"] = True
-            del st.session_state["password"]
-        else:
-            st.session_state["password_correct"] = False
-
-    if "password_correct" not in st.session_state:
-        st.markdown("## 🔒 数据看板访问验证")
-        st.text_input("请输入访问密码", type="password", on_change=password_entered, key="password")
-        return False
-    elif not st.session_state["password_correct"]:
-        st.markdown("## 🔒 数据看板访问验证")
-        st.text_input("请输入访问密码", type="password", on_change=password_entered, key="password")
-        st.error("❌ 密码错误")
-        return False
-    return True
-
-
-if not check_password():
-    st.stop()
-
-
 # ================= 5. 数据加载与清洗 =================
 @st.cache_data
 def load_all_data():
-    p_path = "Streamlit_Master.parquet"
-    c_path_parquet = "Dashboard_Comments.parquet"
-    c_path_csv = "Dashboard_Comments.csv"
+    # 更新了你指定的文件路径
+    p_path = "/Users/jungao/Documents/2_RA/2_weibo_crawl/1_weibo_childbearing_support/crawler_results/Dashboard_labeled_post.parquet"
+    c_path_parquet = "/Users/jungao/Documents/2_RA/2_weibo_crawl/1_weibo_childbearing_support/crawler_results/Dashboard_Comments.parquet"
+
 
     # --- 1. 读取主表 ---
     df_p = pd.read_parquet(p_path)
@@ -302,8 +278,8 @@ with col_left:
 
     st.markdown("---")
 
-    # ---------- 3. 修复：高度压缩的用户画像饼图 ----------
-    st.markdown("### 3. 发帖用户画像占比")
+    # ---------- 3. 发帖用户画像占比与异常流量监测 (已融合新需求) ----------
+    st.markdown("### 3. 用户画像分布与异常流量监测")
     if "user_role" in df.columns:
         role_stats = df["user_role"].fillna("未知").value_counts().reset_index(name="count")
         role_color_map = {'普通真实用户': '#5EAC98', '水军/高频通稿号': '#A8C66C', '官方媒体/政务号': '#F2A93B',
@@ -323,6 +299,68 @@ with col_left:
 
         pie_col1, pie_col2 = st.columns([1, 1])
         with pie_col1: st.plotly_chart(fig_role, use_container_width=True)
+
+    # 👇 新增：异常流量与通稿监测中心
+    st.markdown("#### 🤖 异常数据")
+    tab1, tab2 = st.tabs(["🏆 内容复读机异常数据", "🔥 零评高热度异常数据"])
+
+    with tab1:
+        st.caption("💡 诊断逻辑：内容完全相同的帖子，根据被转发的次数倒序排列，提取 Top 50 的疑似水军通稿。")
+        # 统计每段内容的重复次数
+        content_counts = df["content"].value_counts()
+        # 找出重复超过1次的内容
+        repeat_contents = content_counts[content_counts > 1].index
+        repeat_df = df[df["content"].isin(repeat_contents)].copy()
+
+        if not repeat_df.empty:
+            # 记录重复次数并按转发数排序
+            repeat_df['全网重复次数'] = repeat_df['content'].map(content_counts)
+            repeat_top50 = repeat_df.sort_values(by="post_repost_count", ascending=False).head(50)
+
+            st.dataframe(
+                repeat_top50[
+                    ["post_id", "user_name", "全网重复次数", "post_repost_count", "total_engagement", "content"]],
+                use_container_width=True, height=280
+            )
+        else:
+            st.info("✅ 表现良好，当前数据集中未发现重复发帖异常。")
+
+    with tab2:
+        st.caption("💡 诊断逻辑：只有刷赞/转发，但真实评论数为 0 的帖子。利用滑杆调节异常热度下限。")
+
+        # 1. 先圈定出所有 0 评论的帖子
+        zero_comment_df = df[df["post_comment_count"] == 0]
+
+        # 2. 动态获取 0 评论帖子中的“真实最高互动量”作为滑杆上限
+        if not zero_comment_df.empty and pd.notna(zero_comment_df["total_engagement"].max()):
+            max_eng_zero = int(zero_comment_df["total_engagement"].max())
+        else:
+            max_eng_zero = 0
+
+        # 3. 安全防护：确保 max_value 至少为 10（防止报错），并动态调整默认值
+        slider_max_anomaly = max(max_eng_zero, 10)
+        default_val = min(50, slider_max_anomaly)  # 默认值50，但绝不能超过上限
+
+        # 增加一个控制滑杆
+        anomaly_thresh = st.slider(
+            "把【总互动量（点赞+转发）】作为筛选参考 (默认查找 >50 的零评贴)",
+            min_value=10, max_value=slider_max_anomaly, value=default_val, step=10, key="anomaly_slider"
+        )
+
+        # 应用过滤规则：在 0 评论的底表里，找出热度 >= 滑杆值的帖子
+        anomaly_df = zero_comment_df[zero_comment_df["total_engagement"] >= anomaly_thresh]
+
+        if not anomaly_df.empty:
+            # 按总热度倒序排列，抽取前 50 条 (不足50条有几条展示几条)
+            anomaly_top50 = anomaly_df.sort_values(by="total_engagement", ascending=False).head(50)
+            st.warning(f"🚨 在该阈值下抓到了 {len(anomaly_df)} 条异常帖子，下方展示 Top {len(anomaly_top50)}：")
+            st.dataframe(
+                anomaly_top50[
+                    ["post_id", "user_name", "total_engagement", "post_like_count", "post_repost_count", "content"]],
+                use_container_width=True, height=280
+            )
+        else:
+            st.success(f"✅ 在互动量 >= {anomaly_thresh} 的条件下，未发现 0 评论的异常高热度帖子。")
 
     with st.expander("👉 用户画像样本抽取与锁定", expanded=False):
         role_options = sorted(
@@ -399,6 +437,7 @@ with col_left:
     sel_analysis = st.selectbox("🎯 请选择要探索的分析场景：", analysis_options)
 
     # ================= 场景 1：时效与流量热力图 =================
+    # ================= 场景 1：时效与流量热力图 =================
     if sel_analysis.startswith("1"):
         st.caption(
             "💡 洞察：横轴为全天 24 小时，纵轴为星期几。颜色越深代表该时段平均互动（赞+评+转）越高。")
@@ -420,6 +459,35 @@ with col_left:
             )
             st.plotly_chart(fig1, use_container_width=True)
 
+            # 👇 新增：传统且绝对稳定的下拉框联动筛选
+            st.markdown("#### 🎯 提取特定时段的帖子数据")
+
+            # 使用左右两列并排放置选择器，节省空间
+            c1, c2 = st.columns(2)
+            with c1:
+                sel_day = st.selectbox("📅 选择星期", options=days_order)
+            with c2:
+                # 传入 0-23 的数字，但展示给用户看的是 "0 点", "1 点"
+                sel_hour = st.selectbox("⏰ 选择小时", options=list(range(24)), format_func=lambda x: f"{x} 点")
+
+            # 根据下拉框的值实时过滤原始大表，并按总互动量倒序
+            detail_df = df[(df["day_of_week"] == sel_day) & (df["hour"] == sel_hour)].sort_values(
+                by="total_engagement", ascending=False)
+
+            if not detail_df.empty:
+                st.success(f"✅ 找到了 {len(detail_df)} 条在 **{sel_day} {sel_hour}点** 发布的帖子（按互动热度排序）：")
+
+                # 👇 核心修改：在展示列中加入了 "publish_time" (它包含了完整的日期和时间)
+                show_cols = ["post_id", "user_name", "publish_time", "total_engagement", "post_like_count",
+                             "post_comment_count", "post_repost_count", "content"]
+
+                # 顺手把 publish_time 转换成更好看的字符串格式，防止 Streamlit 报时区错误
+                display_df = detail_df[show_cols].copy()
+                display_df["publish_time"] = display_df["publish_time"].dt.strftime('%Y-%m-%d %H:%M:%S')
+
+                st.dataframe(display_df, use_container_width=True, height=280)
+            else:
+                st.info(f"📭 在 **{sel_day} {sel_hour}点** 暂无帖子记录。")
     # ================= 场景 2：长度与互动散点图 =================
     elif sel_analysis.startswith("2"):
         st.caption("💡 洞察：X 轴为正文长度，Y 轴为互动量（对数轴以拉开差距），颜色区分关键词，气泡大小代表评论量。")
@@ -542,7 +610,6 @@ with col_left:
             fig6.update_xaxes(tickangle=-45, showgrid=False)
             fig6.update_yaxes(showgrid=True, gridcolor="#ECECEC")
             st.plotly_chart(fig6, use_container_width=True)
-
 
             # ================= 场景 7：互动心理 3D 聚类漏斗 =================
     elif sel_analysis.startswith("7"):
