@@ -57,9 +57,9 @@ def load_all_data():
     current_dir = os.path.dirname(os.path.abspath(__file__))
     
     # 自动拼接出极其稳定的绝对路径
-    p_path = os.path.join(current_dir, "crawler_results", "Dashboard_labeled_post.parquet")
-    c_path_parquet = os.path.join(current_dir, "crawler_results", "Dashboard_Comments.parquet")
-    c_path_csv = os.path.join(current_dir, "crawler_results", "Dashboard_Comments.csv")
+    p_path = os.path.join(current_dir,"Dashboard_labeled_post.parquet")
+    c_path_parquet = os.path.join(current_dir,"Dashboard_Comments.parquet")
+
 
     # --- 1. 读取主表 ---
     df_p = pd.read_parquet(p_path)
