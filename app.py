@@ -53,10 +53,13 @@ for key in state_keys:
 # ================= 5. 数据加载与清洗 =================
 @st.cache_data
 def load_all_data():
-    # 更新了你指定的文件路径
-    p_path = "/Users/jungao/Documents/2_RA/2_weibo_crawl/1_weibo_childbearing_support/crawler_results/Dashboard_labeled_post.parquet"
-    c_path_parquet = "/Users/jungao/Documents/2_RA/2_weibo_crawl/1_weibo_childbearing_support/crawler_results/Dashboard_Comments.parquet"
-
+    # 自动获取你当前 app.py 所在的绝对文件夹路径
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    # 自动拼接出极其稳定的绝对路径
+    p_path = os.path.join(current_dir, "crawler_results", "Dashboard_labeled_post.parquet")
+    c_path_parquet = os.path.join(current_dir, "crawler_results", "Dashboard_Comments.parquet")
+    c_path_csv = os.path.join(current_dir, "crawler_results", "Dashboard_Comments.csv")
 
     # --- 1. 读取主表 ---
     df_p = pd.read_parquet(p_path)
