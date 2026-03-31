@@ -172,25 +172,56 @@ with col_left:
         fig_trend.update_yaxes(showgrid=True, gridcolor="#E5E7EB")
         st.plotly_chart(fig_trend, use_container_width=True)
 
-    with st.expander("👉 日期样本抽取与锁定", expanded=False):
+    with st.expander("👉 日期样本抽取与锁定 (支持时间段或单日)", expanded=False):
         date_options = sorted([d for d in df["date"].unique() if pd.notna(d)])
         if date_options:
+            min_d, max_d = min(date_options), max(date_options)
             c1, c2 = st.columns([2, 3])
             with c1:
-                sel_date = st.selectbox("选择具体日期", options=date_options, key="date_select")
+                # 🎯 核心修改：使用 date_input 来支持选单日或者多日范围
+                sel_date_range = st.date_input(
+                    "选择抽样范围（双击同日即为单日）",
+                    value=(min_d, max_d),
+                    min_value=min_d,
+                    max_value=max_d,
+                    key="date_range_select"
+                )
             with c2:
-                subset_date = df[df["date"] == sel_date]
-                max_eng_date = int(subset_date["total_engagement"].max()) if not subset_date.empty and pd.notna(subset_date["total_engagement"].max()) else 0
+                # 🎯 处理日期控件返回的元组或单值
+                if isinstance(sel_date_range, tuple):
+                    if len(sel_date_range) == 2:
+                        start_d, end_d = sel_date_range
+                        subset_date = df[(df["date"] >= start_d) & (df["date"] <= end_d)]
+                        date_label = f"[{start_d} 至 {end_d}]"
+                    elif len(sel_date_range) == 1:  # 用户刚点了一个日期，还没点第二个
+                        start_d = sel_date_range[0]
+                        subset_date = df[df["date"] == start_d]
+                        date_label = f"[{start_d}]"
+                    else:
+                        subset_date = df.copy()
+                        date_label = "[全量]"
+                else:  # 某些版本直接返回 date 对象
+                    start_d = sel_date_range
+                    subset_date = df[df["date"] == start_d]
+                    date_label = f"[{start_d}]"
+
+                max_eng_date = int(subset_date["total_engagement"].max()) if not subset_date.empty and pd.notna(
+                    subset_date["total_engagement"].max()) else 0
                 slider_max_date = max(1, max_eng_date) if max_eng_date == 0 else max_eng_date
 
-                eng_range_date = st.slider("该日期热度范围", 0, slider_max_date, (0, slider_max_date), key="date_eng_range")
+                eng_range_date = st.slider("该时间段热度范围", 0, slider_max_date, (0, slider_max_date),
+                                           key="date_eng_range")
 
-            if st.button("🎲 抽取并锁定该日样本", key="date_sample_btn"):
-                subset = subset_date[subset_date["total_engagement"].between(eng_range_date[0], eng_range_date[1])].copy()
-                st.session_state.sample_date = subset.sample(n=min(100, len(subset)), random_state=42) if not subset.empty else None
+            if st.button("🎲 抽取并锁定此时段样本", key="date_sample_btn"):
+                subset = subset_date[
+                    subset_date["total_engagement"].between(eng_range_date[0], eng_range_date[1])].copy()
+                st.session_state.sample_date = subset.sample(n=min(100, len(subset)),
+                                                             random_state=42) if not subset.empty else None
+                st.session_state.sample_date_label = date_label  # 记住刚才选的时间段名称
 
             if st.session_state.sample_date is not None and not st.session_state.sample_date.empty:
-                st.success(f"已为你锁定符合条件的 {len(st.session_state.sample_date)} 条数据")
+                st.success(
+                    f"已为你锁定 {st.session_state.get('sample_date_label', '')} 符合条件的 {len(st.session_state.sample_date)} 条数据")
                 # 🛡️ 严格应用 FULL_SHOW_COLS
                 cols_to_show = [c for c in FULL_SHOW_COLS if c in st.session_state.sample_date.columns]
                 st.dataframe(st.session_state.sample_date[cols_to_show], use_container_width=True, height=260)
