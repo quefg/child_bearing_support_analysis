@@ -44,7 +44,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ================= 3. Session State 初始化 =================
-state_keys = ["sample_kw", "sample_geo", "sample_role", "current_id"]
+# 新增了 sample_date 用于存储按日期抽取的样本
+state_keys = ["sample_kw", "sample_geo", "sample_role", "sample_date", "current_id"]
 for key in state_keys:
     if key not in st.session_state:
         st.session_state[key] = None
@@ -55,11 +56,10 @@ for key in state_keys:
 def load_all_data():
     # 自动获取你当前 app.py 所在的绝对文件夹路径
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    
-    # 自动拼接出极其稳定的绝对路径
-    p_path = os.path.join(current_dir,"Dashboard_labeled_post.parquet")
-    c_path_parquet = os.path.join(current_dir,"Dashboard_Comments.parquet")
 
+    # 自动拼接出极其稳定的绝对路径
+    p_path = os.path.join(current_dir, "Dashboard_labeled_post.parquet")
+    c_path_parquet = os.path.join(current_dir, "Dashboard_Comments.parquet")
 
     # --- 1. 读取主表 ---
     df_p = pd.read_parquet(p_path)
@@ -91,8 +91,9 @@ def load_all_data():
     # --- 2. 读取评论表 ---
     if os.path.exists(c_path_parquet):
         df_c = pd.read_parquet(c_path_parquet)
-    elif os.path.exists(c_path_csv):
-        df_c = pd.read_csv(c_path_csv, dtype={"post_id": str})
+    # 此处 csv 的路径未定义，如果需要也可以加上 c_path_csv = os.path.join(current_dir,"Dashboard_Comments.csv")
+    # elif os.path.exists(c_path_csv):
+    #     df_c = pd.read_csv(c_path_csv, dtype={"post_id": str})
     else:
         df_c = pd.DataFrame()
 
@@ -177,6 +178,34 @@ with col_left:
         fig_trend.update_yaxes(showgrid=True, gridcolor="#E5E7EB")
         st.plotly_chart(fig_trend, use_container_width=True)
 
+    # 👇 新增：按日期抽取样本的交互器
+    with st.expander("👉 日期样本抽取与锁定", expanded=False):
+        date_options = sorted([d for d in df["date"].unique() if pd.notna(d)])
+        if date_options:
+            c1, c2 = st.columns([2, 3])
+            with c1:
+                sel_date = st.selectbox("选择具体日期", options=date_options, key="date_select")
+            with c2:
+                # 🎯 核心联动：先根据选中的日期过滤出子集，找这个子集的最大热度
+                subset_date = df[df["date"] == sel_date]
+                max_eng_date = int(subset_date["total_engagement"].max()) if not subset_date.empty and pd.notna(
+                    subset_date["total_engagement"].max()) else 0
+                slider_max_date = max(1, max_eng_date) if max_eng_date == 0 else max_eng_date  # 防止最大值为0时滑杆报错
+
+                eng_range_date = st.slider("该日期热度范围", 0, slider_max_date, (0, slider_max_date),
+                                           key="date_eng_range")
+
+            if st.button("🎲 抽取并锁定该日样本", key="date_sample_btn"):
+                subset = subset_date[
+                    subset_date["total_engagement"].between(eng_range_date[0], eng_range_date[1])].copy()
+                st.session_state.sample_date = subset.sample(n=min(100, len(subset)),
+                                                             random_state=42) if not subset.empty else None
+
+            if st.session_state.sample_date is not None and not st.session_state.sample_date.empty:
+                st.success(f"已为你锁定符合条件的 {len(st.session_state.sample_date)} 条数据")
+                # 展示所有列
+                st.dataframe(st.session_state.sample_date, use_container_width=True, height=260)
+
     st.markdown("---")
 
     # ---------- 1. 升级：各关键词下辖数据体量与平均互动热度对比 (双轴图) ----------
@@ -225,11 +254,8 @@ with col_left:
 
             if st.session_state.sample_kw is not None and not st.session_state.sample_kw.empty:
                 st.success(f"已为你锁定符合条件的 {len(st.session_state.sample_kw)} 条数据")
-                show_cols = ["post_id", "keyword", "user_name", "post_like_count", "post_comment_count",
-                             "post_repost_count", "total_engagement", "content"]
-                st.dataframe(
-                    st.session_state.sample_kw[[c for c in show_cols if c in st.session_state.sample_kw.columns]],
-                    use_container_width=True, height=260)
+                # 展示所有列
+                st.dataframe(st.session_state.sample_kw, use_container_width=True, height=260)
 
     st.markdown("---")
 
@@ -275,9 +301,8 @@ with col_left:
 
             if st.session_state.sample_geo is not None and not st.session_state.sample_geo.empty:
                 st.success(f"已为你锁定符合条件的 {len(st.session_state.sample_geo)} 条数据")
-                st.dataframe(
-                    st.session_state.sample_geo[["post_id", "clean_ip", "user_name", "total_engagement", "content"]],
-                    use_container_width=True, height=260)
+                # 展示所有列
+                st.dataframe(st.session_state.sample_geo, use_container_width=True, height=260)
 
     st.markdown("---")
 
@@ -320,11 +345,8 @@ with col_left:
             repeat_df['全网重复次数'] = repeat_df['content'].map(content_counts)
             repeat_top50 = repeat_df.sort_values(by="post_repost_count", ascending=False).head(50)
 
-            st.dataframe(
-                repeat_top50[
-                    ["post_id", "user_name", "全网重复次数", "post_repost_count", "total_engagement", "content"]],
-                use_container_width=True, height=280
-            )
+            # 展示所有列 (+全网重复次数)
+            st.dataframe(repeat_top50, use_container_width=True, height=280)
         else:
             st.info("✅ 表现良好，当前数据集中未发现重复发帖异常。")
 
@@ -357,11 +379,9 @@ with col_left:
             # 按总热度倒序排列，抽取前 50 条 (不足50条有几条展示几条)
             anomaly_top50 = anomaly_df.sort_values(by="total_engagement", ascending=False).head(50)
             st.warning(f"🚨 在该阈值下抓到了 {len(anomaly_df)} 条异常帖子，下方展示 Top {len(anomaly_top50)}：")
-            st.dataframe(
-                anomaly_top50[
-                    ["post_id", "user_name", "total_engagement", "post_like_count", "post_repost_count", "content"]],
-                use_container_width=True, height=280
-            )
+
+            # 展示所有列
+            st.dataframe(anomaly_top50, use_container_width=True, height=280)
         else:
             st.success(f"✅ 在互动量 >= {anomaly_thresh} 的条件下，未发现 0 评论的异常高热度帖子。")
 
@@ -389,9 +409,8 @@ with col_left:
 
             if st.session_state.sample_role is not None and not st.session_state.sample_role.empty:
                 st.success(f"已为你锁定符合条件的 {len(st.session_state.sample_role)} 条数据")
-                st.dataframe(
-                    st.session_state.sample_role[["post_id", "user_role", "user_name", "total_engagement", "content"]],
-                    use_container_width=True, height=260)
+                # 展示所有列
+                st.dataframe(st.session_state.sample_role, use_container_width=True, height=260)
 
     st.markdown("---")
 
@@ -440,7 +459,6 @@ with col_left:
     sel_analysis = st.selectbox("🎯 请选择要探索的分析场景：", analysis_options)
 
     # ================= 场景 1：时效与流量热力图 =================
-    # ================= 场景 1：时效与流量热力图 =================
     if sel_analysis.startswith("1"):
         st.caption(
             "💡 洞察：横轴为全天 24 小时，纵轴为星期几。颜色越深代表该时段平均互动（赞+评+转）越高。")
@@ -480,14 +498,13 @@ with col_left:
             if not detail_df.empty:
                 st.success(f"✅ 找到了 {len(detail_df)} 条在 **{sel_day} {sel_hour}点** 发布的帖子（按互动热度排序）：")
 
-                # 👇 核心修改：在展示列中加入了 "publish_time" (它包含了完整的日期和时间)
-                show_cols = ["post_id", "user_name", "publish_time", "total_engagement", "post_like_count",
-                             "post_comment_count", "post_repost_count", "content"]
-
+                display_df = detail_df.copy()
                 # 顺手把 publish_time 转换成更好看的字符串格式，防止 Streamlit 报时区错误
-                display_df = detail_df[show_cols].copy()
-                display_df["publish_time"] = display_df["publish_time"].dt.strftime('%Y-%m-%d %H:%M:%S')
+                if "publish_time" in display_df.columns:
+                    display_df["publish_time"] = pd.to_datetime(display_df["publish_time"]).dt.strftime(
+                        '%Y-%m-%d %H:%M:%S')
 
+                # 展示所有列
                 st.dataframe(display_df, use_container_width=True, height=280)
             else:
                 st.info(f"📭 在 **{sel_day} {sel_hour}点** 暂无帖子记录。")
