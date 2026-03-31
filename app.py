@@ -8,10 +8,10 @@ import os
 # ================= 0. 定义全局展示列 (严格规范展示标准) =================
 FULL_SHOW_COLS = [
     'post_id', 'keyword','user_name', 'is_spammer',
-    'user_role','post_ip','clean_ip','publish_time','content',
-    'post_repost_count','post_comment_count','post_like_count',  'content_repeat_times',
-    'total_engagement', 'post_tool','search_date','url',
-    'date', 'crawl_time',
+    'user_role','clean_ip','publish_time','content',
+    'post_repost_count','post_comment_count','post_like_count','total_engagement',
+    'content_repeat_times','post_tool',
+    'url','crawl_time',
 ]
 
 # ================= 1. 页面配置 =================
